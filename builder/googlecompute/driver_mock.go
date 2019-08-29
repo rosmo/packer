@@ -3,6 +3,7 @@ package googlecompute
 import (
 	"fmt"
 
+	betacompute "google.golang.org/api/compute/v0.beta"
 	compute "google.golang.org/api/compute/v1"
 )
 
@@ -15,6 +16,7 @@ type DriverMock struct {
 	CreateImageEncryptionKey   *compute.CustomerEncryptionKey
 	CreateImageLabels          map[string]string
 	CreateImageLicenses        []string
+	CreateImageGuestOsFeatures []string
 	CreateImageZone            string
 	CreateImageDisk            string
 	CreateImageResultProjectId string
@@ -22,6 +24,21 @@ type DriverMock struct {
 	CreateImageResultSizeGb    int64
 	CreateImageErrCh           <-chan error
 	CreateImageResultCh        <-chan *Image
+
+	BetaCreateImageName            string
+	BetaCreateImageDesc            string
+	BetaCreateImageFamily          string
+	BetaCreateImageEncryptionKey   *betacompute.CustomerEncryptionKey
+	BetaCreateImageLabels          map[string]string
+	BetaCreateImageLicenses        []string
+	BetaCreateImageGuestOsFeatures []string
+	BetaCreateImageZone            string
+	BetaCreateImageDisk            string
+	BetaCreateImageResultProjectId string
+	BetaCreateImageResultSelfLink  string
+	BetaCreateImageResultSizeGb    int64
+	BetaCreateImageErrCh           <-chan error
+	BetaCreateImageResultCh        <-chan *Image
 
 	DeleteImageName  string
 	DeleteImageErrCh <-chan error
@@ -124,6 +141,53 @@ func (d *DriverMock) CreateImage(name, description, family, zone, disk string, i
 	}
 
 	errCh := d.CreateImageErrCh
+	if errCh == nil {
+		ch := make(chan error)
+		close(ch)
+		errCh = ch
+	}
+
+	return resultCh, errCh
+}
+
+func (d *DriverMock) BetaCreateImage(name, description, family, zone, disk string, image_labels map[string]string, image_licenses []string, image_encryption_key *betacompute.CustomerEncryptionKey, image_guest_os_features []string) (<-chan *Image, <-chan error) {
+	d.BetaCreateImageName = name
+	d.BetaCreateImageDesc = description
+	d.BetaCreateImageFamily = family
+	d.BetaCreateImageLabels = image_labels
+	d.BetaCreateImageLicenses = image_licenses
+	d.BetaCreateImageZone = zone
+	d.BetaCreateImageDisk = disk
+	d.BetaCreateImageEncryptionKey = image_encryption_key
+	d.BetaCreateImageGuestOsFeatures = image_guest_os_features
+	if d.BetaCreateImageResultProjectId == "" {
+		d.BetaCreateImageResultProjectId = "test"
+	}
+	if d.CreateImageResultSelfLink == "" {
+		d.BetaCreateImageResultSelfLink = fmt.Sprintf(
+			"http://content.googleapis.com/compute/v1/%s/global/licenses/test",
+			d.BetaCreateImageResultProjectId)
+	}
+	if d.BetaCreateImageResultSizeGb == 0 {
+		d.BetaCreateImageResultSizeGb = 10
+	}
+
+	resultCh := d.BetaCreateImageResultCh
+	if resultCh == nil {
+		ch := make(chan *Image, 1)
+		ch <- &Image{
+			Labels:    d.BetaCreateImageLabels,
+			Licenses:  d.BetaCreateImageLicenses,
+			Name:      name,
+			ProjectId: d.BetaCreateImageResultProjectId,
+			SelfLink:  d.BetaCreateImageResultSelfLink,
+			SizeGb:    d.BetaCreateImageResultSizeGb,
+		}
+		close(ch)
+		resultCh = ch
+	}
+
+	errCh := d.BetaCreateImageErrCh
 	if errCh == nil {
 		ch := make(chan error)
 		close(ch)

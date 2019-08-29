@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/packer/packer"
 	"github.com/hashicorp/packer/template/interpolate"
 	"golang.org/x/oauth2/jwt"
+	betacompute "google.golang.org/api/compute/v0.beta"
 	compute "google.golang.org/api/compute/v1"
 )
 
@@ -42,6 +43,7 @@ type Config struct {
 	ImageFamily                  string                         `mapstructure:"image_family"`
 	ImageLabels                  map[string]string              `mapstructure:"image_labels"`
 	ImageLicenses                []string                       `mapstructure:"image_licenses"`
+	ImageGuestOsFeatures         []string                       `mapstructure:"image_guest_os_features"`
 	InstanceName                 string                         `mapstructure:"instance_name"`
 	Labels                       map[string]string              `mapstructure:"labels"`
 	MachineType                  string                         `mapstructure:"machine_type"`
@@ -66,10 +68,11 @@ type Config struct {
 	MetadataFiles                map[string]string              `mapstructure:"metadata_files"`
 	Zone                         string                         `mapstructure:"zone"`
 
-	Account            *jwt.Config
-	stateTimeout       time.Duration
-	imageAlreadyExists bool
-	ctx                interpolate.Context
+	Account                *jwt.Config
+	stateTimeout           time.Duration
+	imageAlreadyExists     bool
+	ctx                    interpolate.Context
+	BetaImageEncryptionKey *betacompute.CustomerEncryptionKey
 }
 
 func NewConfig(raws ...interface{}) (*Config, []string, error) {
@@ -242,6 +245,13 @@ func NewConfig(raws ...interface{}) (*Config, []string, error) {
 		if _, err := os.Stat(c.StartupScriptFile); err != nil {
 			errs = packer.MultiErrorAppend(
 				errs, fmt.Errorf("startup_script_file: %v", err))
+		}
+	}
+
+	if c.ImageEncryptionKey != nil {
+		c.BetaImageEncryptionKey = &betacompute.CustomerEncryptionKey{
+			KmsKeyName: c.ImageEncryptionKey.KmsKeyName,
+			RawKey:     c.ImageEncryptionKey.RawKey,
 		}
 	}
 

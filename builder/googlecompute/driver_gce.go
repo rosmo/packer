@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	betacompute "google.golang.org/api/compute/v0.beta"
 	compute "google.golang.org/api/compute/v1"
 
 	"github.com/hashicorp/packer/common/retry"
@@ -28,9 +29,10 @@ import (
 // driverGCE is a Driver implementation that actually talks to GCE.
 // Create an instance using NewDriverGCE.
 type driverGCE struct {
-	projectId string
-	service   *compute.Service
-	ui        packer.Ui
+	projectId   string
+	service     *compute.Service
+	betaService *betacompute.Service
+	ui          packer.Ui
 }
 
 var DriverScopes = []string{"https://www.googleapis.com/auth/compute", "https://www.googleapis.com/auth/devstorage.full_control"}
@@ -87,14 +89,68 @@ func NewDriverGCE(ui packer.Ui, p string, conf *jwt.Config) (Driver, error) {
 		return nil, err
 	}
 
+	log.Printf("[INFO] Instantiating beta GCE client...")
+	betaService, err := betacompute.New(client)
+	if err != nil {
+		return nil, err
+	}
+
 	// Set UserAgent
 	service.UserAgent = useragent.String()
 
 	return &driverGCE{
-		projectId: p,
-		service:   service,
-		ui:        ui,
+		projectId:   p,
+		service:     service,
+		betaService: betaService,
+		ui:          ui,
 	}, nil
+}
+
+func (d *driverGCE) BetaCreateImage(name, description, family, zone, disk string, image_labels map[string]string, image_licenses []string, image_encryption_key *betacompute.CustomerEncryptionKey, image_guest_os_features []string) (<-chan *Image, <-chan error) {
+	image_features := make([]*betacompute.GuestOsFeature, len(image_guest_os_features))
+	for _, v := range image_guest_os_features {
+		image_features = append(image_features, &betacompute.GuestOsFeature{
+			Type: v,
+		})
+	}
+
+	gce_image := &betacompute.Image{
+		Description:        description,
+		Name:               name,
+		Family:             family,
+		GuestOsFeatures:    image_features,
+		Labels:             image_labels,
+		Licenses:           image_licenses,
+		ImageEncryptionKey: image_encryption_key,
+		SourceDisk:         fmt.Sprintf("%s%s/zones/%s/disks/%s", d.service.BasePath, d.projectId, zone, disk),
+		SourceType:         "RAW",
+	}
+
+	imageCh := make(chan *Image, 1)
+	errCh := make(chan error, 1)
+	op, err := d.betaService.Images.Insert(d.projectId, gce_image).Do()
+	if err != nil {
+		errCh <- err
+	} else {
+		go func() {
+			err = waitForState(errCh, "DONE", d.betaRefreshGlobalOp(op))
+			if err != nil {
+				close(imageCh)
+				errCh <- err
+				return
+			}
+			var image *Image
+			image, err = d.GetImageFromProject(d.projectId, name, false)
+			if err != nil {
+				close(imageCh)
+				errCh <- err
+				return
+			}
+			imageCh <- image
+			close(imageCh)
+		}()
+	}
+	return imageCh, errCh
 }
 
 func (d *driverGCE) CreateImage(name, description, family, zone, disk string, image_labels map[string]string, image_licenses []string, image_encryption_key *compute.CustomerEncryptionKey) (<-chan *Image, <-chan error) {
@@ -559,6 +615,27 @@ func (d *driverGCE) refreshInstanceState(zone, name string) stateRefreshFunc {
 func (d *driverGCE) refreshGlobalOp(op *compute.Operation) stateRefreshFunc {
 	return func() (string, error) {
 		newOp, err := d.service.GlobalOperations.Get(d.projectId, op.Name).Do()
+		if err != nil {
+			return "", err
+		}
+
+		// If the op is done, check for errors
+		err = nil
+		if newOp.Status == "DONE" {
+			if newOp.Error != nil {
+				for _, e := range newOp.Error.Errors {
+					err = packer.MultiErrorAppend(err, fmt.Errorf(e.Message))
+				}
+			}
+		}
+
+		return newOp.Status, err
+	}
+}
+
+func (d *driverGCE) betaRefreshGlobalOp(op *betacompute.Operation) stateRefreshFunc {
+	return func() (string, error) {
+		newOp, err := d.betaService.GlobalOperations.Get(d.projectId, op.Name).Do()
 		if err != nil {
 			return "", err
 		}

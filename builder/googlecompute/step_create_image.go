@@ -38,9 +38,22 @@ func (s *StepCreateImage) Run(ctx context.Context, state multistep.StateBag) mul
 
 	ui.Say("Creating image...")
 
-	imageCh, errCh := driver.CreateImage(
-		config.ImageName, config.ImageDescription, config.ImageFamily, config.Zone,
-		config.DiskName, config.ImageLabels, config.ImageLicenses, config.ImageEncryptionKey)
+	ui.Say(fmt.Sprintf("Guest OS features: %v", config.ImageGuestOsFeatures))
+	var (
+		imageCh <-chan *Image
+		errCh   <-chan error
+	)
+	if len(config.ImageGuestOsFeatures) > 0 {
+		imageCh, errCh = driver.BetaCreateImage(
+			config.ImageName, config.ImageDescription, config.ImageFamily, config.Zone,
+			config.DiskName, config.ImageLabels, config.ImageLicenses, config.BetaImageEncryptionKey,
+			config.ImageGuestOsFeatures)
+	} else {
+		imageCh, errCh = driver.CreateImage(
+			config.ImageName, config.ImageDescription, config.ImageFamily, config.Zone,
+			config.DiskName, config.ImageLabels, config.ImageLicenses, config.ImageEncryptionKey)
+	}
+
 	var err error
 	select {
 	case err = <-errCh:
